@@ -9,7 +9,12 @@ dependencies = [
     "pydantic>=2.13.3",
     "torch>=2.11.0",
     "transformers>=5.8.0",
+    "llm-sdk",
+    "accelerate>=1.15.0",
 ]
+
+[tool.uv.sources]
+llm-sdk = { path = "./llm_sdk" }
 
 [tool.mypy]
 # llm_sdk is provided by the subject:
@@ -40,3 +45,4 @@ dev = [
 [tool.flake8]
 exclude = [".venv", "__pycache__", ".mypy_cache", "llm_sdk"]
 max-line-length = 79
+
