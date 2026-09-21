@@ -1,0 +1,42 @@
+[project]
+name = "42-call-me-maybe"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "numpy>=2.4.4",
+    "pydantic>=2.13.3",
+    "torch>=2.11.0",
+    "transformers>=5.8.0",
+]
+
+[tool.mypy]
+# llm_sdk is provided by the subject:
+# neither is our code, so neither is type checked.
+exclude = ["^llm_sdk/", "^\\.venv/"]
+warn_return_any = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+# "exclude" only stops mypy from discovering those files; it still follows
+# the "from llm_sdk import ..." in src/. This is what actually silences it.
+# Note: no follow_imports = "skip" here on purpose. Skipping would make the
+# SDK's return types Any, and --warn-return-any would then fail src/llm.py.
+[[tool.mypy.overrides]]
+module = ["llm_sdk.*"]
+ignore_errors = true
+
+[dependency-groups]
+dev = [
+    "flake8>=7.3.0",
+    "flake8-pyproject>=1.2.4",
+    "mypy>=1.20.2",
+]
+
+# Read by flake8 thanks to the Flake8-pyproject dev dependency.
+[tool.flake8]
+exclude = [".venv", "__pycache__", ".mypy_cache", "llm_sdk"]
+max-line-length = 79
