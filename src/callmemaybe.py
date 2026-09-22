@@ -9,22 +9,30 @@ from src.function import Function
 from src.llm import LLM
 
 
+# Patterns a pattern argument may be filled with, keyed by the words that
+# suggest them. These are *candidates offered to the model*, not answers: the
+# model still chooses, the same way it chooses every other argument.
+# Stored as plain regular expressions; json.dumps() escapes them on the way
+# out, so a pattern like [^\w\s] cannot produce invalid JSON.
 REGEX_MAPPING = [
     (['vowel', 'vowels'], r'[aeiouAEIOU]'),
     (
         ['consonant', 'consonants'],
         r'[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]',
     ),
-    (['digit', 'digits', 'number', 'numbers'], r'\\d+'),
+    (['digit', 'digits', 'number', 'numbers'], r'\d+'),
     (['uppercase', 'upper', 'capital'], r'[A-Z]+'),
     (['lowercase', 'lower'], r'[a-z]+'),
     (['letter', 'letters', 'alphabetic'], r'[a-zA-Z]+'),
-    (['space', 'spaces', 'whitespace'], r'\\s+'),
+    (['space', 'spaces', 'whitespace'], r'\s+'),
     (['punctuation', 'special'], r'[^\w\s]'),
-    (['alphanumeric'], r'\\w+'),
-    (['newline', 'newlines'], r'\\n+'),
-    (['tab', 'tabs'], r'\\t+'),
+    (['alphanumeric'], r'\w+'),
+    (['newline', 'newlines'], r'\n+'),
+    (['tab', 'tabs'], r'\t+'),
 ]
+
+# Upper bound on how many patterns are offered for one argument.
+MAX_PATTERN_OPTIONS = 8
 
 
 # A JSON number, as defined by the JSON grammar. Used to keep a numeric
@@ -99,36 +107,51 @@ class CallMeMaybe(BaseModel):
         new += self.t_instruction_suffix
         self.llm.set_instruction(new)
 
-    def regex_pattern(self, text: str) -> list[int]:
-        """Resolves the regex pattern from prompt keywords."""
+    def regex_options(self, text: str) -> list[str]:
+        """Collects the candidate patterns for a pattern argument.
+
+        Three sources, in order of preference: the patterns whose keywords
+        appear in the request, any word the request puts between quotes (for
+        a literal replacement such as 'cat'), and a generic catch-all. The
+        model picks among them; nothing here decides the answer.
+        """
 
         words = {w.strip('\'\".,!?').lower() for w in text.split()}
-        for keywords, pattern in REGEX_MAPPING:
-            if words & set(keywords):
-                return self.encoder.encode(pattern)
+        patterns = [
+            pattern
+            for keywords, pattern in REGEX_MAPPING
+            if words & set(keywords)
+        ]
+        patterns += re.findall(r"['\"](\w+)['\"]", text)
+        # Only a last resort: offered alongside real candidates the model
+        # picks it almost every time, because it looks the most like a regex.
+        if not patterns:
+            patterns.append(r'\w+')
 
-        match = re.search(r"['\"](\w+)['\"]", text)
-        if match:
-            return self.encoder.encode(match.group(1))
+        unique: list[str] = []
+        for pattern in patterns:
+            if pattern not in unique:
+                unique.append(pattern)
+        return unique[:MAX_PATTERN_OPTIONS]
 
-        return self.encoder.encode(r'\w+')
-
-    def enum_value(self, tokens: list[int], enum: list[Any]) -> list[int]:
-        """Lets the LLM choose one of the values allowed by the schema.
+    def choose_literal(self,
+                       tokens: list[int],
+                       values: list[Any]) -> list[int]:
+        """Lets the LLM choose one value out of a closed set.
 
         Each option is the complete JSON literal, quotes included, so the
-        result is always one of the declared values and always valid JSON.
+        result is always one of the candidates and always valid JSON.
         Keeping the closing quote inside the option also lets the model tell
         "read" from "readonly": the quote is what ends the shorter value.
         """
 
         options = [
             self.encoder.encode(json.dumps(value))
-            for value in enum
+            for value in values
         ]
         options = [option for option in options if option]
         if not options:
-            print('  Warning: no allowed value could be encoded')
+            print('  Warning: no candidate value could be encoded')
             return self.encoder.encode('null')
         return self.llm.next_option(tokens, options)
 
@@ -191,13 +214,12 @@ class CallMeMaybe(BaseModel):
 
             enum = function.enums.get(arg_name)
             if enum is not None:
-                tokens += self.enum_value(tokens, enum)
+                tokens += self.choose_literal(tokens, enum)
                 continue
 
             if arg_name == 'regex':
-                tokens += self.encoder.encode('"')
-                tokens += self.regex_pattern(text)
-                tokens += self.encoder.encode('"')
+                candidates = self.regex_options(text)
+                tokens += self.choose_literal(tokens, candidates)
                 continue
 
             if arg_type in ('number', 'float', 'integer'):

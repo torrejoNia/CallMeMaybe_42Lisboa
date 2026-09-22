@@ -192,8 +192,13 @@ to a single function for phase two.
   stop mid-word on rare names (`"Greet shrek"` → `"shr"`). Solved by moving to
   options-based generation: extract complete phrases and narrow them by token
   prefix until one remains.
-* **The model would not write regexes.** It mixed the description into the
-  pattern (`numbers\d+`). Replaced with deterministic keyword mapping.
+* **The model would not write regexes.** Asked to produce one freely it mixed
+  the description into the pattern (`numbers\d+`). A keyword table was added,
+  but resolving the pattern from it directly meant the model was not consulted
+  at all — a heuristic answering the question instead of a heuristic proposing
+  options. The table now supplies *candidates* (plus any quoted word from the
+  request, plus a generic `\w+`) and the model chooses among them, exactly as
+  it does for every other argument.
 * **Context length and speed.** Sending every function definition on every
   logit call was slow; phase two now sends one.
 * **The chat template.** Without Qwen's `<|im_start|>` / `<tool_call>`

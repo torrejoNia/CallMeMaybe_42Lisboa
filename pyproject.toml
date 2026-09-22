@@ -17,21 +17,26 @@ dependencies = [
 llm-sdk = { path = "./llm_sdk" }
 
 [tool.mypy]
-# llm_sdk is provided by the subject:
-# neither is our code, so neither is type checked.
-exclude = ["^llm_sdk/", "^\\.venv/"]
+# The SDK package lives at llm_sdk/llm_sdk/, with llm_sdk/ being its project
+# directory. Without this, mypy resolves "llm_sdk" to that outer directory --
+# which has no __init__.py, so it looks like an empty namespace package and
+# every "from llm_sdk import Small_LLM_Model" is reported as a missing
+# attribute. Pointing mypy_path at the project directory makes it find the
+# real package, and with it the real signatures.
+mypy_path = "llm_sdk"
+exclude = ["^\\.venv/"]
 warn_return_any = true
 warn_unused_ignores = true
 ignore_missing_imports = true
 disallow_untyped_defs = true
 check_untyped_defs = true
 
-# "exclude" only stops mypy from discovering those files; it still follows
-# the "from llm_sdk import ..." in src/. This is what actually silences it.
-# Note: no follow_imports = "skip" here on purpose. Skipping would make the
-# SDK's return types Any, and --warn-return-any would then fail src/llm.py.
+# The SDK is provided by the subject, so its own type errors are not ours to
+# fix. ignore_errors silences them while still exposing its signatures to
+# src/ -- which matters: follow_imports = "skip" would make them Any instead,
+# and --warn-return-any would then fail src/llm.py.
 [[tool.mypy.overrides]]
-module = ["llm_sdk.*"]
+module = ["llm_sdk", "llm_sdk.*"]
 ignore_errors = true
 
 [dependency-groups]

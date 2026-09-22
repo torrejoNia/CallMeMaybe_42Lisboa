@@ -221,6 +221,7 @@ Phase two is where the type rules live:
 | Declared type | Candidate options | Written as |
 | --- | --- | --- |
 | has an `enum` | the allowed values, as complete JSON literals | as given |
+| named `regex` | keyword-suggested patterns, quoted words, `\w+` | as given |
 | `number` / `integer` | prompt fragments that **match the JSON number grammar** | bare, `.0` added if needed |
 | `boolean` | `true`, `false` | bare |
 | anything else | prompt fragments | between quotes |
@@ -241,10 +242,8 @@ When a parameter declares a closed set:
 ```
 
 `Function` keeps the list and advertises it in the tool schema, so the model
-sees the allowed values. `enum_value()` at
-[src/callmemaybe.py:116](src/callmemaybe.py#L116) then offers each allowed
-value as a **complete JSON literal, quotes included**, and lets `next_option`
-choose:
+sees the allowed values. `choose_literal()` then offers each allowed value as a
+**complete JSON literal, quotes included**, and lets `next_option` choose:
 
 ```
 choose among ['"read"', '"readonly"', '"write"']
@@ -271,20 +270,28 @@ than inventing `"experimental"`.
 This is the distinction to be clear about, because it is where the design's
 strengths and its limits both come from.
 
-**The model chooses:** which function, and which candidate fills each
-argument.
+**The model chooses:** which function, and which candidate fills every
+argument — without exception.
 
 **The program writes:** every brace, quote, colon and comma; every argument
-name; the `.0` on whole numbers; and — for one specific parameter name — the
-regex.
+name; and the `.0` that turns a whole number into a float.
 
-That last one deserves its own paragraph. `REGEX_MAPPING` at
-[src/callmemaybe.py:12](src/callmemaybe.py#L12) is a lookup table from keywords
-to patterns (`vowels` → `[aeiouAEIOU]`, `numbers` → `\\d+`, ...), and
-`add_args` applies it whenever a parameter is literally named `regex`. No model
-call is involved. It produces good answers on the provided tests, but it is a
-hardcoded heuristic keyed on a parameter name, and the subject warns against
-hardcoding to the provided examples. Expect to be asked about it.
+The line between them is *candidate generation* versus *selection*. Generating
+candidates is heuristic everywhere in this design: fragments cut out of the
+prompt for a string, fragments that parse as numbers for a number, the declared
+values for an enum. Selecting one is always the model's job.
+
+Pattern arguments follow that same rule. `REGEX_MAPPING` at
+[src/callmemaybe.py:12](src/callmemaybe.py#L12) maps keywords to patterns
+(`vowels` → `[aeiouAEIOU]`, `numbers` → `\d+`, ...), and `regex_options()`
+turns the request into a short candidate list: the patterns whose keywords
+appear in it, any word it puts between quotes, and a generic `\w+`. That list
+goes to `choose_literal()` like any other argument, and the model picks. The
+table supplies options; it does not supply the answer.
+
+It is still a keyword table, and a reviewer will ask about it. The honest
+answer is that it is a candidate source — the same role the prompt itself
+plays for every other argument — and that the decision is the model's.
 
 ---
 
@@ -388,7 +395,8 @@ because the grader's own code does not follow the norm.
 | How is the function chosen? | phase 1 of `process_func` in [src/callmemaybe.py:233](src/callmemaybe.py#L233) |
 | How is an argument kept to its type? | `add_args` in [src/callmemaybe.py:179](src/callmemaybe.py#L179) |
 | Where do candidate values come from? | `encode_words_separated` in [src/encoder.py:71](src/encoder.py#L71) |
-| How are enums enforced? | `enum_value` in [src/callmemaybe.py:116](src/callmemaybe.py#L116) |
+| How are enums enforced? | `choose_literal` in [src/callmemaybe.py](src/callmemaybe.py) |
+| Where do pattern candidates come from? | `regex_options` in [src/callmemaybe.py](src/callmemaybe.py) |
 | What happens if a file is broken? | the handlers at [src/__main__.py:58](src/__main__.py#L58) |
 | Where would I add a new parameter type? | the type ladder in `add_args` |
 
