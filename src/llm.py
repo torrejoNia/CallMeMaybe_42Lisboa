@@ -6,15 +6,24 @@ from src.encoder import Encoder
 
 
 class LLM(BaseModel):
+    """The model wrapper: masked logits in, a chosen token out.
+
+    The encoder and the instruction are data, so they are declared fields and
+    pydantic validates them when the object is built. The SDK handle stays a
+    PrivateAttr on purpose: it is an injected collaborator rather than data,
+    and since Small_LLM_Model is not a pydantic type, declaring it as a field
+    would buy a single isinstance check at the price of
+    arbitrary_types_allowed, which loosens validation for the whole class.
+    """
+
+    encoder: Encoder
+    instruction: list[int] | None = None
+
     _llm: Small_LLM_Model = PrivateAttr()
-    _encoder: Encoder = PrivateAttr()
-    _t_instruction: list[int] | None = PrivateAttr()
 
     def __init__(self, llm: Small_LLM_Model, encoder: Encoder):
-        super().__init__()
+        super().__init__(encoder=encoder)
         self._llm = llm
-        self._encoder = encoder
-        self._t_instruction = None
         print('LLM created.')
 
     def next_token(self,
@@ -50,8 +59,8 @@ class LLM(BaseModel):
         """Sets the instruction with information for LLM."""
 
         if isinstance(new, str):
-            new = self._encoder.encode(new)
-        self._t_instruction = new
+            new = self.encoder.encode(new)
+        self.instruction = new
 
     def get_logits(self,
                    tokens: list[int],
@@ -60,7 +69,7 @@ class LLM(BaseModel):
         Returns the list of logits for provided tokens.
         Applies the mask optionally.
         """
-        instr = self._t_instruction if self._t_instruction is not None else []
+        instr = self.instruction if self.instruction is not None else []
         lgt = self._llm.get_logits_from_input_ids(instr + tokens)
         if mask is not None:
             lgt = self._apply_mask(mask, lgt)
@@ -77,7 +86,3 @@ class LLM(BaseModel):
         for id in mask:
             masked[id] = logits[id]
         return list(masked)
-
-    @property
-    def encoder(self) -> Encoder:
-        return self._encoder

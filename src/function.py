@@ -1,94 +1,95 @@
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, Field, field_validator
 import json
 from typing import Any
 
 from src.encoder import Encoder
 
 
+def _to_tool_schema(name: str,
+                    description: str,
+                    params: dict[str, str],
+                    enums: dict[str, list[Any]]) -> str:
+    """Renders the function as the JSON tool schema shown to the model."""
+
+    properties: dict[str, Any] = {}
+    for arg_name, arg_type in params.items():
+        properties[arg_name] = {"type": arg_type}
+        if arg_name in enums:
+            properties[arg_name]["enum"] = enums[arg_name]
+    return json.dumps({
+        "name": name,
+        "description": description,
+        "parameters": {
+            "type": "object",
+            "properties": properties,
+            "required": list(params.keys())
+        }
+    })
+
+
 class Function(BaseModel):
-    _name: str = PrivateAttr()
-    _t_name: list[int] = PrivateAttr()
-    _description: str = PrivateAttr()
-    _t_description: list[int] = PrivateAttr()
-    _params: dict[str, str] = PrivateAttr()
-    _t_params: dict[str, list[int]] = PrivateAttr()
-    _enums: dict[str, list[Any]] = PrivateAttr()
-    _t_definition: list[int] = PrivateAttr()
+    """One callable function, as declared in functions_definition.json.
+
+    The fields are declared rather than private, so pydantic validates the
+    whole object when it is built from the input file: a name that is not a
+    string, a parameter map that is not a mapping of strings, or a token list
+    holding something other than integers is rejected at construction, before
+    any prompt is processed.
+    """
+
+    name: str
+    t_name: list[int]
+    description: str = ''
+    t_description: list[int] = Field(default_factory=list)
+    params: dict[str, str] = Field(default_factory=dict)
+    t_params: dict[str, list[int]] = Field(default_factory=dict)
+    enums: dict[str, list[Any]] = Field(default_factory=dict)
+    t_definition: list[int] = Field(default_factory=list)
+
+    @field_validator('name')
+    @classmethod
+    def _check_name(cls, value: str) -> str:
+        """Rejects a name that could not be written as a JSON string."""
+
+        value = value.strip()
+        if not value:
+            raise ValueError('a function name must not be empty')
+        if any(c in value for c in '"\\'):
+            raise ValueError(f'unsupported characters in name: {value!r}')
+        return value
 
     def __init__(self,
                  function: dict[str, Any],
                  encoder: Encoder):
-        super().__init__()
-        self._name: str = function['name']
-        self._t_name = encoder.encode(self._name)
-        self._description: str = function.get('description', '')
-        self._t_description = encoder.encode(self._description)
+        name = function['name']
+        description = function.get('description', '')
         parameters = function.get('parameters', {})
-        self._params = {
+        params = {
             k: v.get('type', 'string')
-            for k, v in parameters.items()
-        }
-        self._t_params = {
-            k: encoder.encode(v.get('type', 'string'))
             for k, v in parameters.items()
         }
         # Parameters restricted to a closed set of values, e.g.
         # {"firmware": {"type": "string", "enum": ["stable", "beta"]}}
-        self._enums = {
+        enums = {
             k: list(v['enum'])
             for k, v in parameters.items()
             if isinstance(v.get('enum'), list) and v['enum']
         }
-        self._t_definition = encoder.encode(self._to_tool_schema())
-
-    def _to_tool_schema(self) -> str:
-        properties: dict[str, Any] = {}
-        for name, arg_type in self._params.items():
-            properties[name] = {"type": arg_type}
-            if name in self._enums:
-                properties[name]["enum"] = self._enums[name]
-        return json.dumps({
-            "name": self._name,
-            "description": self._description,
-            "parameters": {
-                "type": "object",
-                "properties": properties,
-                "required": list(self._params.keys())
-            }
-        })
-
-    @property
-    def t_definition(self) -> list[int]:
-        return self._t_definition
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @property
-    def t_name(self) -> list[int]:
-        return self._t_name
-
-    @property
-    def description(self) -> str:
-        return self._description
-
-    @property
-    def t_description(self) -> list[int]:
-        return self._t_description
-
-    @property
-    def params(self) -> dict[str, str]:
-        return self._params
-
-    @property
-    def t_params(self) -> dict[str, list[int]]:
-        return self._t_params
-
-    @property
-    def enums(self) -> dict[str, list[Any]]:
-        return self._enums
+        schema = _to_tool_schema(name, description, params, enums)
+        super().__init__(
+            name=name,
+            t_name=encoder.encode(name),
+            description=description,
+            t_description=encoder.encode(description),
+            params=params,
+            t_params={
+                arg_name: encoder.encode(arg_type)
+                for arg_name, arg_type in params.items()
+            },
+            enums=enums,
+            t_definition=encoder.encode(schema),
+        )
 
     @property
     def param_names(self) -> list[str]:
-        return list(self._params.keys())
+        return list(self.params.keys())

@@ -145,7 +145,15 @@ its declared set.
 ## Design decisions
 
 * **Pydantic everywhere.** `Encoder`, `LLM`, `Function` and `CallMeMaybe` are
-  all `BaseModel`.
+  all `BaseModel`. `CallMeMaybe` and `Function` validate every field, so a
+  malformed catalogue is rejected at construction rather than halfway through
+  a run; `LLM` validates its encoder and instruction; `Encoder` declares its
+  trie and its vocabulary, which costs about 2 ms at start-up. The trie's
+  value type is `Any` deliberately: a trie is recursive, and there is no cheap
+  way to describe one to pydantic. The one private attribute in the project is the SDK
+  handle inside `LLM`: it is an injected collaborator rather than data, and
+  declaring it as a field would require `arbitrary_types_allowed`, loosening
+  validation for the whole class to buy a single `isinstance` check.
 * **Options instead of character-level masking.** String arguments are chosen
   from complete phrases taken from the prompt. This stops the model halting
   mid-word on a rare name, and guarantees the value is something the user

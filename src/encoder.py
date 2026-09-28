@@ -1,4 +1,4 @@
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel
 from typing import Any
 import re
 
@@ -11,8 +11,14 @@ WORD_PATTERN = re.compile(r'''
 
 
 class Encoder(BaseModel):
-    _trie: dict[str, Any] = PrivateAttr()
-    _vocab: list[str | None] = PrivateAttr()
+    """Text to token ids, and back, using the model's own vocabulary.
+
+    Both structures are declared fields, so pydantic owns them and checks
+    them when the encoder is built.
+    """
+
+    trie: dict[str, Any]
+    vocab: list[str | None]
 
     def __init__(self, tokens: dict[str, int]):
         vocab: list[str | None] = [None] * len(tokens)
@@ -24,9 +30,7 @@ class Encoder(BaseModel):
             for char in word:
                 node = node.setdefault(char, {})
             node['token'] = token
-        super().__init__()
-        self._trie = trie
-        self._vocab = vocab
+        super().__init__(trie=trie, vocab=vocab)
         print('Encoder created.')
 
     def encode(self, text: str) -> list[int]:
@@ -36,7 +40,7 @@ class Encoder(BaseModel):
         ids: list[int] = []
         i = 0
         while i < len(text):
-            node = self._trie
+            node = self.trie
             match_id = None
             match_len = -1
             j = i
@@ -91,9 +95,9 @@ class Encoder(BaseModel):
     def decode(self, tokens: list[int] | int) -> str:
         """Translates LLM tokens to human-readable text."""
         if isinstance(tokens, int):
-            return self._vocab[tokens] or ''
+            return self.vocab[tokens] or ''
         return special_to_standart(
-            ''.join(self._vocab[t] or '' for t in tokens)
+            ''.join(self.vocab[t] or '' for t in tokens)
         )
 
 
