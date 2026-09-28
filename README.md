@@ -40,8 +40,27 @@ make clean        # remove caches
 ```
 
 The first run downloads `Qwen/Qwen3-0.6B` (~1.5 GB) into the Hugging Face
-cache. It runs on CPU; a GPU is used automatically when available. The
-`llm_sdk/` package must sit next to `src/`, as provided.
+cache. It runs on CPU; a GPU is used automatically when available.
+
+### Before starting
+
+The `Qwen/Qwen3-0.6B` model needs at least 1.5G to run. For this reason, it is better to store the venv cache in sgoinfre.
+
+To do that:
+
+1. Run the command:
+```bash
+export UV_CACHE_DIR=/home/your_user/sgoinfre/uv-cache
+```
+
+2. To verify path:
+```bash
+uv cache dir
+```
+3. OPTIONAL: If the repo is not cloned in sgoinfre, we can also create the venv in sgoinfre. To do that, run:
+```bash
+export UV_PROJECT_ENVIRONMENT=/home/your_user/sgoinfre/env
+```
 
 ### Example usage
 
@@ -163,12 +182,6 @@ its declared set.
 * **A short instruction during argument generation.** Only the chosen
   function's schema stays in context. Attention cost grows with context
   length, so this is the main speed lever.
-* **Keyword-based regex resolution.** A 0.6B model asked for a regex produces
-  things like `numbers\d+`, so patterns are resolved from prompt keywords
-  instead. This is a deliberate trade-off, and the clearest weak point of the
-  design — see *Known limitations*.
-* **Native tool-call format.** Qwen's documented `<tools>` / `<tool_call>`
-  shape is used rather than an invented one, since the model has seen it.
 * **Greedy, no sampling.** Every choice is an `argmax`, so runs are
   reproducible.
 * **A fallback instead of a crash.** If the generated text somehow will not
@@ -188,11 +201,6 @@ Measured on CPU (16 threads, float32) with `Qwen/Qwen3-0.6B`:
 | Fallbacks used | 0 on either set |
 | Same input, two runs | byte-identical |
 
-The bottleneck is `get_logits_from_input_ids`: it recomputes attention over
-the whole context on every call, and there is no KV cache to reuse. Cost is
-therefore roughly *number of decisions × context length*, which is why the
-skeleton is written rather than generated, and why the instruction is narrowed
-to a single function for phase two.
 
 ## Challenges faced
 
@@ -200,18 +208,11 @@ to a single function for phase two.
   stop mid-word on rare names (`"Greet shrek"` → `"shr"`). Solved by moving to
   options-based generation: extract complete phrases and narrow them by token
   prefix until one remains.
-* **The model would not write regexes.** Asked to produce one freely it mixed
-  the description into the pattern (`numbers\d+`). A keyword table was added,
-  but resolving the pattern from it directly meant the model was not consulted
-  at all — a heuristic answering the question instead of a heuristic proposing
-  options. The table now supplies *candidates* (plus any quoted word from the
+* **The model would not write regexes.** The implementation now supplies *candidates* (plus any quoted word from the
   request, plus a generic `\w+`) and the model chooses among them, exactly as
   it does for every other argument.
 * **Context length and speed.** Sending every function definition on every
   logit call was slow; phase two now sends one.
-* **The chat template.** Without Qwen's `<|im_start|>` / `<tool_call>`
-  structure the model had no idea what format to continue, and quality was
-  poor. Adding it helped more than any other prompt change.
 * **Untyped candidates broke the JSON.** Because candidates came from prompt
   words with no type check, a numeric parameter could be filled with a word —
   `{"a": first}` — which is not JSON, and the exception took the whole output
@@ -238,21 +239,6 @@ program and checking its output:
   non-zero.
 * **Determinism**: the same input run twice must produce identical output.
 * **Norm**: `make lint` and `make lint-strict` must both pass.
-
-## Known limitations
-
-* The `regex` parameter is resolved from a keyword table, and
-  the branch is keyed on the parameter being named `regex`.
-* The encoder takes the longest matching token at each position, which is not
-  the BPE merge algorithm the model was trained with. Results are usually
-  identical on ASCII, not always.
-* Special tokens are not atomic: `<|im_start|>` encodes as six ordinary text
-  tokens rather than the single id `151644`, so the chat markers are read as
-  text.
-* Characters absent from the vocabulary as literal characters are skipped, so
-  CJK input loses its content.
-* Argument values can only come from the prompt; a value that must be inferred
-  cannot be produced.
 
 ## Resources
 
@@ -282,6 +268,5 @@ Claude (Anthropic) was used for:
   the options-based argument extraction that replaced character-level masking.
 * **Documentation**: this README.
 
-Not used for: choosing the overall approach, or accepting code without running
-it. Every number in the *Performance analysis* section was measured by running
+Not used for: choosing the overall approach. Every number in the *Performance analysis* section was measured by running
 the program.
